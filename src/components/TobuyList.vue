@@ -1,11 +1,14 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import {
   fetchTobuys,
   createTobuy,
   deleteTobuy,
   togglePurchased,
-  toggleFavorite
+  toggleFavorite,
+  filterTobuys,
+  toggleDarkMode,
+  isDarkModeEnabled,
 } from '../api/tobuyApi.js'
 
 // Zustand (State)
@@ -14,13 +17,33 @@ const nameField = ref('')
 const loading = ref(false)
 const error = ref('')
 
+// Suche
+const searchQuery = ref('')
+const filteredItems = computed(() => {
+  // optional: gefilterte Liste auch sortieren
+  const filtered = filterTobuys(items.value, searchQuery.value)
+  return sortItems([...filtered])
+})
+
+// Dark Mode
+const darkMode = ref(isDarkModeEnabled())
+
+function applyDarkMode(enabled) {
+  document.documentElement.classList.toggle('dark', enabled)
+}
+
+function handleToggleDarkMode() {
+  darkMode.value = toggleDarkMode()
+}
+
+watch(darkMode, (val) => applyDarkMode(val))
+
 // Liste laden
 async function load() {
   loading.value = true
   error.value = ''
   try {
     items.value = sortItems(await fetchTobuys())
-
   } catch (e) {
     console.error(e)
     error.value = '❌ Fehler beim Laden der Einträge.'
@@ -33,19 +56,18 @@ function sortItems(list) {
   return list.sort((a, b) => {
     // 1. Favoriten oben
     if (a.favorite !== b.favorite) {
-      return a.favorite ? -1 : 1;
+      return a.favorite ? -1 : 1
     }
 
-    // 2. Nicht-gekaute oben
+    // 2. Nicht-gekaufte oben
     if (a.purchased !== b.purchased) {
-      return a.purchased ? 1 : -1;
+      return a.purchased ? 1 : -1
     }
 
     // 3. Zuletzt benutzt (lastUsedAt) – neueste zuerst
-    return new Date(b.lastUsedAt) - new Date(a.lastUsedAt);
-  });
+    return new Date(b.lastUsedAt) - new Date(a.lastUsedAt)
+  })
 }
-
 
 // Neuen Eintrag anlegen
 async function addItem() {
@@ -53,8 +75,8 @@ async function addItem() {
 
   try {
     await createTobuy({ name: nameField.value })
-    nameField.value = ''   // Eingabefeld leeren
-    await load()           // Liste aktualisieren
+    nameField.value = '' // Eingabefeld leeren
+    await load() // Liste aktualisieren
   } catch (e) {
     console.error(e)
     error.value = '❌ Fehler beim Hinzufügen.'
@@ -94,17 +116,35 @@ async function toggleFavoriteItem(id) {
   }
 }
 
-onMounted(load)
+// Initial
+onMounted(() => {
+  applyDarkMode(darkMode.value)
+  load()
+})
 </script>
 
 <template>
   <section class="list-container">
-    <h2>🛒 Meine Einkaufsliste</h2>
+    <div class="header">
+      <h2>🛒 Meine Einkaufsliste</h2>
 
-    <!-- Eingabefeld -->
+      <button class="mode-btn" @click="handleToggleDarkMode">
+        {{ darkMode ? '☀️ Light' : '🌙 Dark' }}
+      </button>
+    </div>
+
+    <!-- Eingabefeld: hinzufügen -->
     <div class="input-area">
       <input v-model="nameField" placeholder="Produktname" type="text" />
       <button @click="addItem">➕ Hinzufügen</button>
+    </div>
+
+    <!-- Suche -->
+    <div class="input-area">
+      <input v-model="searchQuery" placeholder="🔍 Suchen..." type="text" />
+      <button class="clear-btn" @click="searchQuery = ''" :disabled="!searchQuery">
+        ✖︎
+      </button>
     </div>
 
     <p v-if="loading">⏳ Lade Daten…</p>
@@ -113,44 +153,48 @@ onMounted(load)
     <!-- Tabelle -->
     <table v-if="!loading && !error">
       <thead>
-        <tr>
-          <th>⭐</th>
-          <th>Produkt</th>
-          <th>✔️</th>
-          <th>Aktion</th>
-        </tr>
+      <tr>
+        <th>⭐</th>
+        <th>Produkt</th>
+        <th>✔️</th>
+        <th>Aktion</th>
+      </tr>
       </thead>
 
       <tbody>
-        <tr v-if="items.length === 0">
-          <td colspan="4">🧺 Noch keine Einträge vorhanden</td>
-        </tr>
+      <tr v-if="items.length === 0">
+        <td colspan="4">🧺 Noch keine Einträge vorhanden</td>
+      </tr>
 
-        <tr v-for="item in items" :key="item.id">
-          <!-- FAVORITE -->
-          <td>
-            <button @click="toggleFavoriteItem(item.id)">
-              {{ item.favorite ? "⭐" : "☆" }}
-            </button>
-          </td>
+      <tr v-else-if="filteredItems.length === 0">
+        <td colspan="4">🔎 Keine Treffer</td>
+      </tr>
 
-          <!-- NAME -->
-          <td>{{ item.name }}</td>
+      <tr v-for="item in filteredItems" :key="item.id">
+        <!-- FAVORITE -->
+        <td>
+          <button @click="toggleFavoriteItem(item.id)">
+            {{ item.favorite ? '⭐' : '☆' }}
+          </button>
+        </td>
 
-          <!-- PURCHASED -->
-          <td>
-            <button @click="togglePurchasedItem(item.id)">
-              {{ item.purchased ? "✔️" : "⬜" }}
-            </button>
-          </td>
+        <!-- NAME -->
+        <td>{{ item.name }}</td>
 
-          <!-- DELETE -->
-          <td>
-            <button class="delete-btn" @click="removeItem(item.id)">
-              🗑️ Löschen
-            </button>
-          </td>
-        </tr>
+        <!-- PURCHASED -->
+        <td>
+          <button @click="togglePurchasedItem(item.id)">
+            {{ item.purchased ? '✔️' : '⬜' }}
+          </button>
+        </td>
+
+        <!-- DELETE -->
+        <td>
+          <button class="delete-btn" @click="removeItem(item.id)">
+            🗑️ Löschen
+          </button>
+        </td>
+      </tr>
       </tbody>
     </table>
   </section>
@@ -162,6 +206,19 @@ onMounted(load)
   margin: 2rem auto;
   text-align: center;
   font-family: system-ui, sans-serif;
+  background: white;
+  color: #111827;
+  border-radius: 12px;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
 }
 
 .input-area {
@@ -174,6 +231,9 @@ onMounted(load)
 input {
   padding: 0.4rem;
   font-size: 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  outline: none;
 }
 
 button {
@@ -189,6 +249,28 @@ button:hover {
   background-color: #1d4ed8;
 }
 
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mode-btn {
+  background: #111827;
+}
+
+.mode-btn:hover {
+  background: #0b1220;
+}
+
+.clear-btn {
+  background: #6b7280;
+  padding: 0.5rem 0.75rem;
+}
+
+.clear-btn:hover {
+  background: #4b5563;
+}
+
 .delete-btn {
   background-color: #dc2626;
 }
@@ -198,7 +280,7 @@ button:hover {
 }
 
 .error {
-  color: red;
+  color: #dc2626;
   font-weight: bold;
   margin-bottom: 1rem;
 }
@@ -209,9 +291,45 @@ table {
   margin-top: 1rem;
 }
 
-th, td {
+th,
+td {
   border: 1px solid #ddd;
   padding: 0.5rem;
 }
-</style>
 
+/* Dark Mode via <html class="dark"> */
+:global(html.dark) .list-container {
+  background: #0b1220;
+  color: #e5e7eb;
+  border-color: #374151;
+}
+
+:global(html.dark) input {
+  background: #111827;
+  color: #e5e7eb;
+  border-color: #374151;
+}
+
+:global(html.dark) table,
+:global(html.dark) th,
+:global(html.dark) td {
+  border-color: #374151;
+}
+
+:global(html.dark) .mode-btn {
+  background: #f59e0b;
+  color: #111827;
+}
+
+:global(html.dark) .mode-btn:hover {
+  background: #d97706;
+}
+
+:global(html.dark) .clear-btn {
+  background: #374151;
+}
+
+:global(html.dark) .clear-btn:hover {
+  background: #1f2937;
+}
+</style>
