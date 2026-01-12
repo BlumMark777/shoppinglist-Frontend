@@ -11,7 +11,7 @@ import {
   isDarkModeEnabled,
 } from '../api/tobuyApi.js'
 
-// Zustand (State)
+// State
 const items = ref([])
 const nameField = ref('')
 const loading = ref(false)
@@ -19,11 +19,25 @@ const error = ref('')
 
 // Suche
 const searchQuery = ref('')
+
+// ⭐ Nur-Favoriten-Filter
+const showOnlyFavorites = ref(false)
+
+// Gefilterte + sortierte Items
 const filteredItems = computed(() => {
-  // optional: gefilterte Liste auch sortieren
   const filtered = filterTobuys(items.value, searchQuery.value)
-  return sortItems([...filtered])
+
+  const favFiltered = showOnlyFavorites.value
+      ? filtered.filter(item => item.favorite)
+      : filtered
+
+  return sortItems([...favFiltered])
 })
+
+// Favoritenfilter toggeln
+function toggleFavoritesFilter() {
+  showOnlyFavorites.value = !showOnlyFavorites.value
+}
 
 // Dark Mode
 const darkMode = ref(isDarkModeEnabled())
@@ -38,7 +52,7 @@ function handleToggleDarkMode() {
 
 watch(darkMode, (val) => applyDarkMode(val))
 
-// Liste laden
+// Laden
 async function load() {
   loading.value = true
   error.value = ''
@@ -54,36 +68,34 @@ async function load() {
 
 function sortItems(list) {
   return list.sort((a, b) => {
-    // 1. Favoriten oben
-    if (a.favorite !== b.favorite) {
-      return a.favorite ? -1 : 1
-    }
-
-    // 2. Nicht-gekaufte oben
-    if (a.purchased !== b.purchased) {
-      return a.purchased ? 1 : -1
-    }
-
-    // 3. Zuletzt benutzt (lastUsedAt) – neueste zuerst
+    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
+    if (a.purchased !== b.purchased) return a.purchased ? 1 : -1
     return new Date(b.lastUsedAt) - new Date(a.lastUsedAt)
   })
 }
 
-// Neuen Eintrag anlegen
+// Create
 async function addItem() {
-  if (!nameField.value.trim()) return
+  const trimmed = nameField.value.trim()
+
+  // ❗ Fehler, wenn Eingabe leer oder nur Leerzeichen
+  if (!trimmed) {
+    error.value = '❌ Bitte einen gültigen Produktnamen eingeben.'
+    return
+  }
 
   try {
-    await createTobuy({ name: nameField.value })
-    nameField.value = '' // Eingabefeld leeren
-    await load() // Liste aktualisieren
+    await createTobuy({ name: trimmed })
+    nameField.value = ''
+    error.value = '' // Fehler entfernen nach Erfolg
+    await load()
   } catch (e) {
     console.error(e)
     error.value = '❌ Fehler beim Hinzufügen.'
   }
 }
 
-// Eintrag löschen
+// Delete
 async function removeItem(id) {
   try {
     await deleteTobuy(id)
@@ -94,7 +106,7 @@ async function removeItem(id) {
   }
 }
 
-// Purchased toggeln
+// Toggle purchased
 async function togglePurchasedItem(id) {
   try {
     await togglePurchased(id)
@@ -105,7 +117,7 @@ async function togglePurchasedItem(id) {
   }
 }
 
-// Favorite toggeln
+// Toggle favorite
 async function toggleFavoriteItem(id) {
   try {
     await toggleFavorite(id)
@@ -116,7 +128,6 @@ async function toggleFavoriteItem(id) {
   }
 }
 
-// Initial
 onMounted(() => {
   applyDarkMode(darkMode.value)
   load()
@@ -133,25 +144,41 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- Eingabefeld: hinzufügen -->
-    <div class="input-area">
-      <input v-model="nameField" placeholder="Produktname" type="text" />
-      <button @click="addItem">➕ Hinzufügen</button>
-    </div>
+    <!-- Top Bar: Add + Search -->
+    <div class="toolbar">
+      <div class="row">
+        <input v-model="nameField" placeholder="Produktname" type="text" />
+        <button @click="addItem">➕ Hinzufügen</button>
+      </div>
 
-    <!-- Suche -->
-    <div class="input-area">
-      <input v-model="searchQuery" placeholder="🔍 Suchen..." type="text" />
-      <button class="clear-btn" @click="searchQuery = ''" :disabled="!searchQuery">
-        ✖︎
-      </button>
+      <div class="row search">
+        <input v-model="searchQuery" placeholder="🔍 Suchen..." type="text" />
+        <button
+            class="clear-btn"
+            @click="searchQuery = ''"
+            :disabled="!searchQuery"
+            title="Suche löschen"
+        >
+          ✖︎
+        </button>
+      </div>
+
+      <!-- ⭐ Neuer Favoriten-Filter-Button -->
+      <div class="row favorites-row">
+        <button
+            class="favorites-btn"
+            :class="{ active: showOnlyFavorites }"
+            @click="toggleFavoritesFilter"
+        >
+          {{ showOnlyFavorites ? '📋 Alle Produkte anzeigen' : '⭐ Favoriten anzeigen' }}
+        </button>
+      </div>
     </div>
 
     <p v-if="loading">⏳ Lade Daten…</p>
     <p v-if="error" class="error">{{ error }}</p>
 
-    <!-- Tabelle -->
-    <table v-if="!loading && !error">
+    <table v-if="!loading">
       <thead>
       <tr>
         <th>⭐</th>
@@ -171,28 +198,22 @@ onMounted(() => {
       </tr>
 
       <tr v-for="item in filteredItems" :key="item.id">
-        <!-- FAVORITE -->
         <td>
-          <button @click="toggleFavoriteItem(item.id)">
+          <button class="icon-btn" @click="toggleFavoriteItem(item.id)">
             {{ item.favorite ? '⭐' : '☆' }}
           </button>
         </td>
 
-        <!-- NAME -->
-        <td>{{ item.name }}</td>
+        <td class="name-cell">{{ item.name }}</td>
 
-        <!-- PURCHASED -->
         <td>
-          <button @click="togglePurchasedItem(item.id)">
+          <button class="icon-btn" @click="togglePurchasedItem(item.id)">
             {{ item.purchased ? '✔️' : '⬜' }}
           </button>
         </td>
 
-        <!-- DELETE -->
         <td>
-          <button class="delete-btn" @click="removeItem(item.id)">
-            🗑️ Löschen
-          </button>
+          <button class="delete-btn" @click="removeItem(item.id)">🗑️ Löschen</button>
         </td>
       </tr>
       </tbody>
@@ -201,135 +222,297 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.list-container {
-  max-width: 700px;
-  margin: 2rem auto;
-  text-align: center;
-  font-family: system-ui, sans-serif;
-  background: white;
-  color: #111827;
-  border-radius: 12px;
-  padding: 1rem;
-  border: 1px solid #e5e7eb;
+/* ===== Tokens (Light) ===== */
+:global(:root) {
+  --bg: #f6f7fb;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+
+  --border: rgba(15, 23, 42, 0.1);
+  --shadow: 0 16px 50px rgba(2, 6, 23, 0.1);
+
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+
+  --focus: 0 0 0 4px rgba(37, 99, 235, 0.2);
+
+  --radius: 16px;
+  --radius-sm: 12px;
 }
 
+/* ===== Tokens (Dark) ===== */
+:global(html.dark) {
+  --bg: #0b1220;
+  --card: #0f172a;
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+
+  --border: rgba(148, 163, 184, 0.18);
+  --shadow: 0 18px 55px rgba(0, 0, 0, 0.5);
+
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+
+  --danger: #f87171;
+  --danger-hover: #ef4444;
+
+  --focus: 0 0 0 4px rgba(59, 130, 246, 0.25);
+}
+
+/* Page BG */
+:global(body) {
+  background: var(--bg);
+}
+
+/* Card */
+.list-container {
+  max-width: 860px;
+  margin: 4rem auto;
+  padding: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji",
+  "Segoe UI Emoji";
+}
+
+/* Header */
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
-.input-area {
-  display: flex;
-  justify-content: center;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-input {
-  padding: 0.4rem;
-  font-size: 1rem;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  outline: none;
-}
-
-button {
-  background-color: #2563eb;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-button:hover {
-  background-color: #1d4ed8;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
 }
 
 .mode-btn {
-  background: #111827;
-}
-
-.mode-btn:hover {
-  background: #0b1220;
-}
-
-.clear-btn {
-  background: #6b7280;
-  padding: 0.5rem 0.75rem;
-}
-
-.clear-btn:hover {
-  background: #4b5563;
-}
-
-.delete-btn {
-  background-color: #dc2626;
-}
-
-.delete-btn:hover {
-  background-color: #b91c1c;
-}
-
-.error {
-  color: #dc2626;
-  font-weight: bold;
-  margin-bottom: 1rem;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 1rem;
-}
-
-th,
-td {
-  border: 1px solid #ddd;
-  padding: 0.5rem;
-}
-
-/* Dark Mode via <html class="dark"> */
-:global(html.dark) .list-container {
-  background: #0b1220;
-  color: #e5e7eb;
-  border-color: #374151;
-}
-
-:global(html.dark) input {
-  background: #111827;
-  color: #e5e7eb;
-  border-color: #374151;
-}
-
-:global(html.dark) table,
-:global(html.dark) th,
-:global(html.dark) td {
-  border-color: #374151;
+  background: rgba(100, 116, 139, 0.18);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  padding: 0.6rem 0.85rem;
 }
 
 :global(html.dark) .mode-btn {
-  background: #f59e0b;
-  color: #111827;
+  background: rgba(148, 163, 184, 0.12);
 }
 
-:global(html.dark) .mode-btn:hover {
-  background: #d97706;
+/* Toolbar */
+.toolbar {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0.5rem;
 }
 
-:global(html.dark) .clear-btn {
-  background: #374151;
+.row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
-:global(html.dark) .clear-btn:hover {
-  background: #1f2937;
+.search {
+  align-items: center;
+}
+
+/* ⭐ FAVORITEN-BUTTON */
+.favorites-row {
+  justify-content: center;
+}
+
+.favorites-btn {
+  background: rgba(234, 179, 8, 0.12);
+  color: #b45309;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  font-size: 0.85rem;
+  border: 1px solid transparent;
+  box-shadow: none;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.favorites-btn:hover {
+  background: rgba(234, 179, 8, 0.22);
+}
+
+.favorites-btn.active {
+  background: rgba(234, 179, 8, 0.28);
+  border-color: rgba(234, 179, 8, 0.8);
+}
+
+/* Inputs */
+input {
+  width: min(360px, 90%);
+  padding: 0.72rem 0.9rem;
+  font-size: 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+input::placeholder {
+  color: var(--muted);
+}
+
+input:focus {
+  border-color: rgba(37, 99, 235, 0.55);
+  box-shadow: var(--focus);
+}
+
+/* Buttons */
+button {
+  border: 1px solid transparent;
+  background: var(--primary);
+  color: white;
+  padding: 0.72rem 1rem;
+  font-size: 0.95rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.2);
+}
+
+button:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0px);
+  opacity: 0.95;
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Clear button */
+.clear-btn {
+  background: rgba(100, 116, 139, 0.18);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  padding: 0.72rem 0.9rem;
+}
+
+/* Icon buttons in table */
+.icon-btn {
+  padding: 0.45rem 0.75rem;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+/* Delete button */
+.delete-btn {
+  background: var(--danger);
+  box-shadow: 0 10px 25px rgba(239, 68, 68, 0.18);
+}
+
+.delete-btn:hover {
+  background: var(--danger-hover);
+}
+
+/* Text */
+.error {
+  color: var(--danger);
+  font-weight: 600;
+  margin: 0.5rem 0 0;
+}
+
+p {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+}
+
+/* Table */
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-top: 1.25rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+thead th {
+  text-align: left;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.95rem 1rem;
+  background: rgba(100, 116, 139, 0.06);
+}
+
+tbody td {
+  padding: 0.9rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+tbody tr:hover td {
+  background: rgba(37, 99, 235, 0.05);
+}
+
+tbody tr td[colspan="4"] {
+  text-align: center;
+  color: var(--muted);
+  padding: 1.2rem;
+}
+
+thead th:first-child,
+thead th:nth-child(3),
+tbody td:first-child,
+tbody td:nth-child(3) {
+  text-align: center;
+  width: 90px;
+}
+
+thead th:last-child,
+tbody td:last-child {
+  width: 180px;
+}
+
+.name-cell {
+  font-weight: 600;
+}
+
+/* Mobile */
+@media (max-width: 560px) {
+  .list-container {
+    margin: 2rem 1rem;
+    padding: 1rem;
+  }
+  button {
+    width: 100%;
+  }
+  input {
+    width: 100%;
+  }
+  .clear-btn {
+    width: auto;
+  }
 }
 </style>
